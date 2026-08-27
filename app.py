@@ -17,35 +17,60 @@ def load_data():
     except Exception:
         df = pd.read_csv("Dataset/database.csv", sep=None, engine="python", encoding="latin1")
 
-    # Clean column names
+    # Standardize column headers
     df.columns = [c.strip().upper() for c in df.columns]
 
-    # Map Year / Date
+    # Helper function to parse messy currency/numeric formats
+    def clean_num(series):
+        return pd.to_numeric(
+            series.astype(str).str.replace('$', '', regex=False).str.replace(',', '', regex=False).str.strip(),
+            errors='coerce'
+        ).fillna(0)
+
+    # 1. Year Mapping
     if "IYEAR" in df.columns:
         df["Year"] = pd.to_numeric(df["IYEAR"], errors="coerce")
     elif "ACCIDENT DATE/TIME" in df.columns:
-        df["Accident Date/Time"] = pd.to_datetime(df["ACCIDENT DATE/TIME"], errors="coerce")
-        df["Year"] = df["Accident Date/Time"].dt.year
+        df["Year"] = pd.to_datetime(df["ACCIDENT DATE/TIME"], errors="coerce").dt.year
     else:
-        date_col = next((c for c in df.columns if "DATE" in c or "TIME" in c), None)
+        date_col = next((c for c in df.columns if any(k in c for k in ["DATE", "TIME", "MDATE", "IDATE"])), None)
         df["Year"] = pd.to_datetime(df[date_col], errors="coerce").dt.year if date_col else 2026
 
-    # Map Costs
-    cost_col = next((c for c in ["TOTAL_COST_CURRENT", "TOTAL_COST_INFLATION", "ALL COSTS", "TOTAL_COST"] if c in df.columns), None)
-    df["Cost_Clean"] = pd.to_numeric(df[cost_col], errors="coerce").fillna(0) if cost_col else 0.0
+    # 2. Cost Mapping (checks all PHMSA cost variations)
+    cost_keywords = ["TOTAL_COST", "EST_COST", "ALL_COSTS", "PROPERTY_DAMAGE", "COST"]
+    cost_match = next((c for c in df.columns if any(k in c for k in cost_keywords)), None)
+    df["Cost_Clean"] = clean_num(df[cost_match]) if cost_match else 0.0
 
-    # Map Net Loss / Release volume
-    loss_col = next((c for c in ["UNINTENTIONAL_RELEASE_BBLS", "UNINTENTIONAL_RELEASE_MCF", "NET LOSS (BARRELS)", "TOTAL_RELEASE_BBLS"] if c in df.columns), None)
-    df["Loss_Clean"] = pd.to_numeric(df[loss_col], errors="coerce").fillna(0) if loss_col else 0.0
+# 3. Robust Volume/Loss Mapping
+    # Find all columns related to volume, release, or MCF/BBLS
+    potential_vol_cols = [
+        c for c in df.columns 
+        if any(k in c for k in ["RELEASE_MCF", "RELEASE_BBL", "UNINTENTIONAL", "TOTAL_RELEASE", "COMMODITY_RELEASED", "VOLUME", "NET_LOSS"])
+        and not any(neg in c for neg in ["TIME", "DATE", "DESC", "METHOD", "TEXT"])
+    ]
 
-    # Map Cause, Commodity, and Operator
+    # Pick the volume column with the highest sum of non-zero numbers
+    best_vol_col = None
+    max_val = 0
+    for col in potential_vol_cols:
+        parsed = clean_num(df[col])
+        if parsed.sum() > max_val:
+            max_val = parsed.sum()
+            best_vol_col = col
+
+    if best_vol_col:
+        df["Loss_Clean"] = clean_num(df[best_vol_col])
+    else:
+        df["Loss_Clean"] = 0.0
+
+    # 4. Cause, Commodity, and Operator
     df["Cause_Clean"] = df[next((c for c in ["CAUSE", "CAUSE CATEGORY", "GENERAL_CAUSE"] if c in df.columns), "")] if any(c in df.columns for c in ["CAUSE", "CAUSE CATEGORY", "GENERAL_CAUSE"]) else "Unspecified"
-    df["Commodity_Clean"] = df[next((c for c in ["COMMODITY_RELEASED_TYPE", "LIQUID NAME", "COMMODITY_SUB_TYPE"] if c in df.columns), "")] if any(c in df.columns for c in ["COMMODITY_RELEASED_TYPE", "LIQUID NAME", "COMMODITY_SUB_TYPE"]) else "Gas/Liquid"
+    df["Commodity_Clean"] = df[next((c for c in ["COMMODITY_RELEASED_TYPE", "LIQUID NAME", "COMMODITY_SUB_TYPE", "SYSTEM_TYPE"] if c in df.columns), "")] if any(c in df.columns for c in ["COMMODITY_RELEASED_TYPE", "LIQUID NAME", "COMMODITY_SUB_TYPE", "SYSTEM_TYPE"]) else "Natural Gas"
     df["Operator_Clean"] = df[next((c for c in ["NAME", "OPERATOR NAME", "OPERATOR_NAME"] if c in df.columns), "")] if any(c in df.columns for c in ["NAME", "OPERATOR NAME", "OPERATOR_NAME"]) else "Operator"
 
-    # Map Coordinates
-    lat_col = next((c for c in ["LOCATION_LATITUDE", "DECIMAL_LATITUDE", "ACCIDENT LATITUDE"] if c in df.columns), None)
-    lon_col = next((c for c in ["LOCATION_LONGITUDE", "DECIMAL_LONGITUDE", "ACCIDENT LONGITUDE"] if c in df.columns), None)
+    # 5. Coordinates
+    lat_col = next((c for c in ["LOCATION_LATITUDE", "DECIMAL_LATITUDE", "ACCIDENT LATITUDE", "LATITUDE"] if c in df.columns), None)
+    lon_col = next((c for c in ["LOCATION_LONGITUDE", "DECIMAL_LONGITUDE", "ACCIDENT LONGITUDE", "LONGITUDE"] if c in df.columns), None)
     df["Latitude"] = pd.to_numeric(df[lat_col], errors="coerce") if lat_col else np.nan
     df["Longitude"] = pd.to_numeric(df[lon_col], errors="coerce") if lon_col else np.nan
 
