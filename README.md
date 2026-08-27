@@ -17,7 +17,7 @@ Pipeline infrastructure is critical to energy transportation, yet equipment fail
 This platform aggregates historical accident records across the United States to provide real-time KPIs, multi-dimensional safety trends, interactive geospatial incident mapping, and an integrated **Random Forest Regression model** for dynamic incident cost forecasting.
 
 ---
-
+Note: This project was built with AI-assisted development (Claude) for rapid prototyping of the data pipeline, ML model, and dashboard UI, with the author reviewing, testing, and deploying the final application
 ## ✨ Key Features
 
 - **Dynamic KPI Summaries:** Instant metrics tracking total incidents, cumulative financial damage ($M), and total net loss/volume release.
